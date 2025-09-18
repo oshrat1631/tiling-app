@@ -236,6 +236,7 @@
                     <input type="number" id="shapeHeight" value="10" min="1" max="30" class="w-16 px-2 py-1 border border-gray-300 rounded text-center">
                     <button class="control-btn bg-purple-600 hover:bg-purple-700" onclick="createAutoShape()">צור שטח ריצוף</button>
                     <button class="control-btn bg-orange-600 hover:bg-orange-700" onclick="finishShapeCreation()">סיים יצירת שטח</button>
+                    <button class="control-btn bg-red-600 hover:bg-red-700" id="deleteShapeBtn" onclick="deleteSelectedShape()" style="display: none;">🗑️ מחק שטח</button>
                 </div>
                 
                 <!-- כפתורי בקרה -->
@@ -402,7 +403,10 @@
         let isDragging = false;
         let dragStartPos = null;
         let createdShapes = [];
+        // שכבת ציור ידני שתישמר גם כשמזיזים שטחים אוטומטיים
+        let manualPaintLayer = [];
         let draggedShape = null;
+        let selectedShape = null; // בחירת שטח אוטומטי לעריכה/מחיקה
         let removeMode = false;
         let actionHistory = [];
         let historyIndex = -1;
@@ -416,6 +420,7 @@
             // גריד היעד 30x60
             const targetGrid = document.getElementById('targetGrid');
             targetGridData = Array(30).fill().map(() => Array(60).fill('#ffffff'));
+            manualPaintLayer = Array(30).fill().map(() => Array(60).fill(null));
             
             for (let i = 0; i < 30; i++) {
                 for (let j = 0; j < 60; j++) {
@@ -600,6 +605,9 @@
                     // תמיד מאפשר גרירה של שטח קיים
                     isDragging = true;
                     draggedShape = clickedShape;
+                    selectedShape = clickedShape;
+                    const deleteShapeBtn = document.getElementById('deleteShapeBtn');
+                    if (deleteShapeBtn) deleteShapeBtn.style.display = 'inline-block';
                     
                     // שמירת המיקום המדויק של הלחיצה בתוך השטח
                     dragStartPos = [row, col];
@@ -614,6 +622,9 @@
                     // יצירת שטח חדש בגרירה
                     isDragging = true;
                     dragStartPos = [row, col];
+                    selectedShape = null;
+                    const deleteShapeBtn = document.getElementById('deleteShapeBtn');
+                    if (deleteShapeBtn) deleteShapeBtn.style.display = 'none';
                 }
                 
                 // שמירת נתוני מגע
@@ -638,6 +649,9 @@
             draggedShape = null;
             lastTouchPos = null;
             touchMoved = false;
+            // אחרי שחרור, כפתור מחיקת שטח נשאר אם יש בחירה
+            const deleteShapeBtn = document.getElementById('deleteShapeBtn');
+            if (deleteShapeBtn) deleteShapeBtn.style.display = selectedShape ? 'inline-block' : 'none';
         }
 
         function handleDrag(row, col) {
@@ -676,6 +690,8 @@
                 // צביעת האזור הנגרר עם אפקט חלק
                 for (let i = startRow; i <= endRow; i++) {
                     for (let j = startCol; j <= endCol; j++) {
+                        // ציור ידני בזמן גרירה נשמר כשכבה ידנית
+                        manualPaintLayer[i][j] = selectedColor;
                         targetGridData[i][j] = selectedColor;
                         const cellIndex = i * 60 + j;
                         const cell = document.getElementById('targetGrid').children[cellIndex];
@@ -702,6 +718,24 @@
                     targetGridData[row][col] = shape.color;
                 });
             });
+
+            // החלת שכבת ציור ידני מעל השטחים (כמו ב-updateGridDisplay)
+            for (let i = 0; i < 30; i++) {
+                for (let j = 0; j < 60; j++) {
+                    if (manualPaintLayer[i][j]) {
+                        targetGridData[i][j] = manualPaintLayer[i][j];
+                    }
+                }
+            }
+
+            // החלת שכבת ציור ידני מעל השטחים - לא למחוק ידני בעת הזזת שטחים
+            for (let i = 0; i < 30; i++) {
+                for (let j = 0; j < 60; j++) {
+                    if (manualPaintLayer[i][j]) {
+                        targetGridData[i][j] = manualPaintLayer[i][j];
+                    }
+                }
+            }
             
             // עכשיו עדכון התצוגה הויזואלית עם אפקטים חלקים
             for (let i = 0; i < 30; i++) {
@@ -756,6 +790,30 @@
                 }
             }
             return null;
+        }
+        // מחיקת שטח אוטומטי נבחר
+        function deleteSelectedShape() {
+            if (!selectedShape) {
+                showStatus('אין שטח נבחר למחיקה', 'error');
+                return;
+            }
+            // שמירת מצב
+            saveState();
+
+            // הסרת השטח מהמערך
+            const idx = createdShapes.indexOf(selectedShape);
+            if (idx >= 0) {
+                createdShapes.splice(idx, 1);
+            }
+
+            // ניקוי הבחירה והסתרת כפתור מחיקה
+            selectedShape = null;
+            const deleteShapeBtn = document.getElementById('deleteShapeBtn');
+            if (deleteShapeBtn) deleteShapeBtn.style.display = 'none';
+
+            // רענון התצוגה - שכבת הידני תישמר
+            updateGridDisplay();
+            showStatus('🗑️ שטח נמחק', 'success');
         }
 
 
@@ -815,35 +873,11 @@
             
             if (!isValidMove) return;
             
-            // שמירת המיקום הישן לניקוי
-            const oldCells = [...shape.cells];
-            
-            // עדכון המיקום החדש
+            // עדכון המיקום החדש בלבד; הרינדור המלא ידאג לשכבות הידני/שטחים/אריחים
             shape.cells = newCells;
-            
-            // ניקוי המיקום הישן - עדכון targetGridData לפי השכבות
-            oldCells.forEach(([row, col]) => {
-                const correctColor = getTopLayerColor(row, col);
-                targetGridData[row][col] = correctColor;
-                const cellIndex = row * 60 + col;
-                const cell = document.getElementById('targetGrid').children[cellIndex];
-                cell.style.backgroundColor = correctColor;
-                
-                if (correctColor === '#ffffff') {
-                    cell.style.border = '1px solid #e5e7eb';
-                } else {
-                    cell.style.border = '2px solid #374151';
-                }
-            });
-            
-            // צביעת המיקום החדש - השטח הנגרר יהיה בשכבה עליונה
-            shape.cells.forEach(([row, col]) => {
-                targetGridData[row][col] = shape.color;
-                const cellIndex = row * 60 + col;
-                const cell = document.getElementById('targetGrid').children[cellIndex];
-                cell.style.backgroundColor = shape.color;
-                cell.style.border = '2px solid #374151';
-            });
+
+            // רענון תצוגה חלק שמכבד שכבות ידני
+            updateGridDisplaySmooth();
         }
 
         // צביעת תא בגריד היעד
@@ -866,6 +900,8 @@
             }
             
             if (shapeCreationMode) {
+                // ציור ידני נשמר בשכבה נפרדת כדי שלא יימחק בהזזת שטחים
+                manualPaintLayer[row][col] = selectedColor;
                 targetGridData[row][col] = selectedColor;
                 const cellIndex = row * 60 + col;
                 const cell = document.getElementById('targetGrid').children[cellIndex];
@@ -876,7 +912,8 @@
                 return;
             }
             
-            // מצב רגיל - צביעה פשוטה
+            // מצב רגיל - צביעה פשוטה גם נשמרת בשכבה הידנית
+            manualPaintLayer[row][col] = selectedColor;
             targetGridData[row][col] = selectedColor;
             const cellIndex = row * 60 + col;
             const cell = document.getElementById('targetGrid').children[cellIndex];
@@ -932,14 +969,16 @@
                 cells: []
             };
             
-            // צביעת המלבן והוספת התאים לשטח
+            // צביעת המלבן והוספת התאים לשטח (לא לדרוס ידני)
             for (let i = startRow; i < startRow + height && i < 30; i++) {
                 for (let j = startCol; j < startCol + width && j < 60; j++) {
-                    targetGridData[i][j] = selectedColor;
+                    if (!manualPaintLayer[i][j]) {
+                        targetGridData[i][j] = selectedColor;
+                    }
                     const cellIndex = i * 60 + j;
                     const cell = document.getElementById('targetGrid').children[cellIndex];
                     if (cell) {
-                        cell.style.backgroundColor = selectedColor;
+                        cell.style.backgroundColor = manualPaintLayer[i][j] ? manualPaintLayer[i][j] : selectedColor;
                         cell.style.border = '2px solid #374151';
                     }
                     newShape.cells.push([i, j]);
@@ -990,6 +1029,9 @@
             isDragging = false;
             dragStartPos = null;
             draggedShape = null;
+            selectedShape = null;
+            const deleteShapeBtn = document.getElementById('deleteShapeBtn');
+            if (deleteShapeBtn) deleteShapeBtn.style.display = 'none';
             
             // הסרת הבורדר המיוחד מכל השטחים
             createdShapes.forEach(shape => {
@@ -1394,6 +1436,15 @@
                     targetGridData[row][col] = shape.color;
                 });
             });
+
+            // החלת שכבת ציור ידני מעל השטחים
+            for (let i = 0; i < 30; i++) {
+                for (let j = 0; j < 60; j++) {
+                    if (manualPaintLayer[i][j]) {
+                        targetGridData[i][j] = manualPaintLayer[i][j];
+                    }
+                }
+            }
             
             // עכשיו עדכון התצוגה הויזואלית
             for (let i = 0; i < 30; i++) {
@@ -1819,8 +1870,10 @@
                         cell.style.borderBottom = borderParts[2];
                         cell.style.borderLeft = borderParts[3];
                     } else {
-                        // שחזור צבע הרקע המקורי
-                        cell.style.backgroundColor = targetGridData[row][col];
+                        // שחזור צבע הרקע המקורי, תוך העדפת שכבת ציור ידני אם קיימת
+                        const manualColor = manualPaintLayer[row][col];
+                        const baseColor = manualColor ? manualColor : targetGridData[row][col];
+                        cell.style.backgroundColor = baseColor;
                         cell.style.border = '1px solid #e5e7eb';
                     }
                 }
