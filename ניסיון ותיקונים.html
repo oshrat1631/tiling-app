@@ -27,6 +27,29 @@
                 transform: scale(1.02);
             }
         }
+        
+        @keyframes shake {
+            0%, 100% {
+                transform: translateX(0) scale(0.95);
+            }
+            25% {
+                transform: translateX(-1px) scale(0.95);
+            }
+            75% {
+                transform: translateX(1px) scale(0.95);
+            }
+        }
+        
+        @keyframes smoothMove {
+            0% {
+                transform: scale(1.05);
+                opacity: 0.9;
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
         .color-btn {
             width: 30px;
             height: 30px;
@@ -69,6 +92,14 @@
             background: #9ca3af;
             cursor: not-allowed;
             transform: none;
+        }
+        
+        /* מניעת גלילה/בחירה בזמן גרירה על הגריד */
+        #targetGrid, #targetGrid .grid-cell {
+            touch-action: none;
+            -ms-touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
         }
         
         /* סטיילים רספונסיביים למובייל */
@@ -236,7 +267,6 @@
                     <input type="number" id="shapeHeight" value="10" min="1" max="30" class="w-16 px-2 py-1 border border-gray-300 rounded text-center">
                     <button class="control-btn bg-purple-600 hover:bg-purple-700" onclick="createAutoShape()">צור שטח ריצוף</button>
                     <button class="control-btn bg-orange-600 hover:bg-orange-700" onclick="finishShapeCreation()">סיים יצירת שטח</button>
-                    <button class="control-btn bg-red-600 hover:bg-red-700" id="deleteShapeBtn" onclick="deleteSelectedShape()" style="display: none;">🗑️ מחק שטח</button>
                 </div>
                 
                 <!-- כפתורי בקרה -->
@@ -403,16 +433,32 @@
         let isDragging = false;
         let dragStartPos = null;
         let createdShapes = [];
-        // שכבת ציור ידני שתישמר גם כשמזיזים שטחים אוטומטיים
-        let manualPaintLayer = [];
         let draggedShape = null;
-        let selectedShape = null; // בחירת שטח אוטומטי לעריכה/מחיקה
         let removeMode = false;
         let actionHistory = [];
         let historyIndex = -1;
         let tileMoveMode = false;
         let selectedTileForMove = null;
         let draggedTile = null;
+        
+        // מצבי גרירת אריחים (Pointer Events)
+        let isTileDragging = false;
+        let usingPointerDrag = false;
+        let tileDragPointerId = null;
+        let tileDragStartCell = null;
+        let lastTileDragTarget = null;
+        let tileDragMoved = false;
+        let suppressClick = false;
+        let tileDragStartPoint = null;
+        let tileGrabOffset = null; // שמירת מיקום האחיזה ביחס לפינת האריח
+
+        // מאזיני Pointer מאוחדים לגרירת אריחים (נוספים פעם אחת בלבד)
+        if (!window._tilePointerListenersAdded) {
+            window._tilePointerListenersAdded = true;
+            document.addEventListener('pointermove', onTilePointerMove, { passive: false });
+            document.addEventListener('pointerup', onTilePointerUp, { passive: false });
+            document.addEventListener('pointercancel', onTilePointerUp, { passive: false });
+        }
 
 
         // אתחול הגרידים
@@ -420,19 +466,20 @@
             // גריד היעד 30x60
             const targetGrid = document.getElementById('targetGrid');
             targetGridData = Array(30).fill().map(() => Array(60).fill('#ffffff'));
-            manualPaintLayer = Array(30).fill().map(() => Array(60).fill(null));
             
             for (let i = 0; i < 30; i++) {
                 for (let j = 0; j < 60; j++) {
                     const cell = document.createElement('div');
                     cell.className = 'grid-cell';
                     cell.style.backgroundColor = '#ffffff';
-                    cell.onclick = () => paintTargetCell(i, j);
+                    cell.onclick = () => { if (suppressClick) return; paintTargetCell(i, j); };
                     cell.onmousedown = (e) => handleMouseDown(i, j, e);
                     cell.ontouchstart = (e) => {
                         e.preventDefault();
                         handleMouseDown(i, j, e);
                     };
+                    // התחלת גרירת אריחים באופן מאוחד (מחשב ומובייל)
+                    cell.onpointerdown = (e) => startTilePointerDrag(i, j, e);
                     cell.onmouseenter = () => {
                         if (tilingMode && currentTile.length > 0) {
                             showTilePreview(i, j);
@@ -455,6 +502,7 @@
                     let cellTouchStartPos = null;
                     
                     cell.ontouchstart = (e) => {
+                        if (tileMoveMode) return; // בגרירת אריחים נטפל ב-Pointer Events
                         e.preventDefault();
                         cellTouchStartTime = Date.now();
                         cellTouchMoved = false;
@@ -463,6 +511,7 @@
                     };
                     
                     cell.ontouchmove = (e) => {
+                        if (tileMoveMode) return; // בגרירת אריחים נטפל ב-Pointer Events
                         e.preventDefault();
                         const touch = e.touches[0];
                         
@@ -497,6 +546,7 @@
                     };
                     
                     cell.ontouchend = (e) => {
+                        if (tileMoveMode || usingPointerDrag) return; // מניעת כפילות במצב גרירת אריחים
                         e.preventDefault();
                         const touchDuration = Date.now() - cellTouchStartTime;
                         
@@ -605,9 +655,6 @@
                     // תמיד מאפשר גרירה של שטח קיים
                     isDragging = true;
                     draggedShape = clickedShape;
-                    selectedShape = clickedShape;
-                    const deleteShapeBtn = document.getElementById('deleteShapeBtn');
-                    if (deleteShapeBtn) deleteShapeBtn.style.display = 'inline-block';
                     
                     // שמירת המיקום המדויק של הלחיצה בתוך השטח
                     dragStartPos = [row, col];
@@ -622,9 +669,6 @@
                     // יצירת שטח חדש בגרירה
                     isDragging = true;
                     dragStartPos = [row, col];
-                    selectedShape = null;
-                    const deleteShapeBtn = document.getElementById('deleteShapeBtn');
-                    if (deleteShapeBtn) deleteShapeBtn.style.display = 'none';
                 }
                 
                 // שמירת נתוני מגע
@@ -649,9 +693,94 @@
             draggedShape = null;
             lastTouchPos = null;
             touchMoved = false;
-            // אחרי שחרור, כפתור מחיקת שטח נשאר אם יש בחירה
-            const deleteShapeBtn = document.getElementById('deleteShapeBtn');
-            if (deleteShapeBtn) deleteShapeBtn.style.display = selectedShape ? 'inline-block' : 'none';
+        }
+
+        // התחלת גרירת אריחים (Pointer Events)
+        function startTilePointerDrag(row, col, e) {
+            if (!tileMoveMode) return;
+            usingPointerDrag = true;
+            tileDragPointerId = e.pointerId;
+            e.preventDefault();
+            if (e.stopPropagation) e.stopPropagation();
+            if (e.target && e.target.setPointerCapture) {
+                try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+            }
+
+            if (!selectedTileForMove) {
+                selectTileForMove(row, col);
+            }
+            if (!selectedTileForMove) return;
+
+            isTileDragging = true;
+            tileDragStartCell = [row, col];
+            tileDragStartPoint = { x: e.clientX, y: e.clientY };
+            tileDragMoved = false;
+            suppressClick = false;
+
+            // חישוב היסט האחיזה ביחס לפינת האריח (minRow/minCol)
+            try {
+                const { tile } = selectedTileForMove;
+                const currentBounds = getTileBounds(tile.positions.map(([r, c]) => [r, c]));
+                tileGrabOffset = [row - currentBounds.minRow, col - currentBounds.minCol];
+            } catch (_) {
+                tileGrabOffset = [0, 0];
+            }
+        }
+
+        function onTilePointerMove(e) {
+            if (!tileMoveMode || !isTileDragging) return;
+            if (tileDragPointerId !== null && e.pointerId !== tileDragPointerId) return;
+            e.preventDefault();
+
+            const element = document.elementFromPoint(e.clientX, e.clientY);
+            if (!element || !element.classList || !element.classList.contains('grid-cell')) return;
+            const cellIndex = Array.from(element.parentNode.children).indexOf(element);
+            const hoverRow = Math.floor(cellIndex / 60);
+            const hoverCol = cellIndex % 60;
+
+            // התאמת היעד כך שהאריח יעקוב אחרי נקודת האחיזה
+            const grabRowOffset = tileGrabOffset ? tileGrabOffset[0] : 0;
+            const grabColOffset = tileGrabOffset ? tileGrabOffset[1] : 0;
+            const targetRow = hoverRow - grabRowOffset;
+            const targetCol = hoverCol - grabColOffset;
+
+            if (!tileDragStartPoint) {
+                tileDragStartPoint = { x: e.clientX, y: e.clientY };
+            }
+            const dx = Math.abs(e.clientX - tileDragStartPoint.x);
+            const dy = Math.abs(e.clientY - tileDragStartPoint.y);
+            const movedEnough = dx > 3 || dy > 3;
+
+            if (movedEnough) {
+                tileDragMoved = true;
+                suppressClick = true;
+                moveTileToPositionAuto(targetRow, targetCol);
+            } else {
+                showSmoothTileDragPreview(targetRow, targetCol);
+            }
+        }
+
+        function onTilePointerUp(e) {
+            if (!tileMoveMode) return;
+            if (tileDragPointerId !== null && e.pointerId !== tileDragPointerId) return;
+            e.preventDefault();
+
+            if (isTileDragging) {
+                if (tileDragMoved && selectedTileForMove) {
+                    saveState();
+                    selectedTileForMove = null;
+                    clearTileDragPreview();
+                    showStatus('האריח הוזז בהצלחה!', 'success');
+                    checkTilingComplete();
+                }
+            }
+            isTileDragging = false;
+            usingPointerDrag = false;
+            tileDragPointerId = null;
+            tileDragStartCell = null;
+            tileDragStartPoint = null;
+            tileGrabOffset = null;
+            setTimeout(() => { suppressClick = false; }, 0);
         }
 
         function handleDrag(row, col) {
@@ -690,8 +819,6 @@
                 // צביעת האזור הנגרר עם אפקט חלק
                 for (let i = startRow; i <= endRow; i++) {
                     for (let j = startCol; j <= endCol; j++) {
-                        // ציור ידני בזמן גרירה נשמר כשכבה ידנית
-                        manualPaintLayer[i][j] = selectedColor;
                         targetGridData[i][j] = selectedColor;
                         const cellIndex = i * 60 + j;
                         const cell = document.getElementById('targetGrid').children[cellIndex];
@@ -718,24 +845,6 @@
                     targetGridData[row][col] = shape.color;
                 });
             });
-
-            // החלת שכבת ציור ידני מעל השטחים (כמו ב-updateGridDisplay)
-            for (let i = 0; i < 30; i++) {
-                for (let j = 0; j < 60; j++) {
-                    if (manualPaintLayer[i][j]) {
-                        targetGridData[i][j] = manualPaintLayer[i][j];
-                    }
-                }
-            }
-
-            // החלת שכבת ציור ידני מעל השטחים - לא למחוק ידני בעת הזזת שטחים
-            for (let i = 0; i < 30; i++) {
-                for (let j = 0; j < 60; j++) {
-                    if (manualPaintLayer[i][j]) {
-                        targetGridData[i][j] = manualPaintLayer[i][j];
-                    }
-                }
-            }
             
             // עכשיו עדכון התצוגה הויזואלית עם אפקטים חלקים
             for (let i = 0; i < 30; i++) {
@@ -790,30 +899,6 @@
                 }
             }
             return null;
-        }
-        // מחיקת שטח אוטומטי נבחר
-        function deleteSelectedShape() {
-            if (!selectedShape) {
-                showStatus('אין שטח נבחר למחיקה', 'error');
-                return;
-            }
-            // שמירת מצב
-            saveState();
-
-            // הסרת השטח מהמערך
-            const idx = createdShapes.indexOf(selectedShape);
-            if (idx >= 0) {
-                createdShapes.splice(idx, 1);
-            }
-
-            // ניקוי הבחירה והסתרת כפתור מחיקה
-            selectedShape = null;
-            const deleteShapeBtn = document.getElementById('deleteShapeBtn');
-            if (deleteShapeBtn) deleteShapeBtn.style.display = 'none';
-
-            // רענון התצוגה - שכבת הידני תישמר
-            updateGridDisplay();
-            showStatus('🗑️ שטח נמחק', 'success');
         }
 
 
@@ -873,11 +958,35 @@
             
             if (!isValidMove) return;
             
-            // עדכון המיקום החדש בלבד; הרינדור המלא ידאג לשכבות הידני/שטחים/אריחים
+            // שמירת המיקום הישן לניקוי
+            const oldCells = [...shape.cells];
+            
+            // עדכון המיקום החדש
             shape.cells = newCells;
-
-            // רענון תצוגה חלק שמכבד שכבות ידני
-            updateGridDisplaySmooth();
+            
+            // ניקוי המיקום הישן - עדכון targetGridData לפי השכבות
+            oldCells.forEach(([row, col]) => {
+                const correctColor = getTopLayerColor(row, col);
+                targetGridData[row][col] = correctColor;
+                const cellIndex = row * 60 + col;
+                const cell = document.getElementById('targetGrid').children[cellIndex];
+                cell.style.backgroundColor = correctColor;
+                
+                if (correctColor === '#ffffff') {
+                    cell.style.border = '1px solid #e5e7eb';
+                } else {
+                    cell.style.border = '2px solid #374151';
+                }
+            });
+            
+            // צביעת המיקום החדש - השטח הנגרר יהיה בשכבה עליונה
+            shape.cells.forEach(([row, col]) => {
+                targetGridData[row][col] = shape.color;
+                const cellIndex = row * 60 + col;
+                const cell = document.getElementById('targetGrid').children[cellIndex];
+                cell.style.backgroundColor = shape.color;
+                cell.style.border = '2px solid #374151';
+            });
         }
 
         // צביעת תא בגריד היעד
@@ -900,8 +1009,6 @@
             }
             
             if (shapeCreationMode) {
-                // ציור ידני נשמר בשכבה נפרדת כדי שלא יימחק בהזזת שטחים
-                manualPaintLayer[row][col] = selectedColor;
                 targetGridData[row][col] = selectedColor;
                 const cellIndex = row * 60 + col;
                 const cell = document.getElementById('targetGrid').children[cellIndex];
@@ -912,8 +1019,7 @@
                 return;
             }
             
-            // מצב רגיל - צביעה פשוטה גם נשמרת בשכבה הידנית
-            manualPaintLayer[row][col] = selectedColor;
+            // מצב רגיל - צביעה פשוטה
             targetGridData[row][col] = selectedColor;
             const cellIndex = row * 60 + col;
             const cell = document.getElementById('targetGrid').children[cellIndex];
@@ -969,16 +1075,14 @@
                 cells: []
             };
             
-            // צביעת המלבן והוספת התאים לשטח (לא לדרוס ידני)
+            // צביעת המלבן והוספת התאים לשטח
             for (let i = startRow; i < startRow + height && i < 30; i++) {
                 for (let j = startCol; j < startCol + width && j < 60; j++) {
-                    if (!manualPaintLayer[i][j]) {
-                        targetGridData[i][j] = selectedColor;
-                    }
+                    targetGridData[i][j] = selectedColor;
                     const cellIndex = i * 60 + j;
                     const cell = document.getElementById('targetGrid').children[cellIndex];
                     if (cell) {
-                        cell.style.backgroundColor = manualPaintLayer[i][j] ? manualPaintLayer[i][j] : selectedColor;
+                        cell.style.backgroundColor = selectedColor;
                         cell.style.border = '2px solid #374151';
                     }
                     newShape.cells.push([i, j]);
@@ -1029,9 +1133,6 @@
             isDragging = false;
             dragStartPos = null;
             draggedShape = null;
-            selectedShape = null;
-            const deleteShapeBtn = document.getElementById('deleteShapeBtn');
-            if (deleteShapeBtn) deleteShapeBtn.style.display = 'none';
             
             // הסרת הבורדר המיוחד מכל השטחים
             createdShapes.forEach(shape => {
@@ -1436,15 +1537,6 @@
                     targetGridData[row][col] = shape.color;
                 });
             });
-
-            // החלת שכבת ציור ידני מעל השטחים
-            for (let i = 0; i < 30; i++) {
-                for (let j = 0; j < 60; j++) {
-                    if (manualPaintLayer[i][j]) {
-                        targetGridData[i][j] = manualPaintLayer[i][j];
-                    }
-                }
-            }
             
             // עכשיו עדכון התצוגה הויזואלית
             for (let i = 0; i < 30; i++) {
@@ -1566,35 +1658,87 @@
             tileMoveMode = !tileMoveMode;
             selectedTileForMove = null;
             clearTilePreview();
+            clearTileDragPreview();
             
-            // הסתרת כפתורי עריכת האריח
+            // הסתרת כפתורי עריכת האריח עם אנימציה
             const deleteBtn = document.getElementById('deleteTileBtn');
             const rotateBtn = document.getElementById('rotateTileBtn');
             const flipBtn = document.getElementById('flipTileBtn');
-            deleteBtn.style.display = 'none';
-            rotateBtn.style.display = 'none';
-            flipBtn.style.display = 'none';
+            
+            // אנימציה חלקה להסתרת הכפתורים
+            [deleteBtn, rotateBtn, flipBtn].forEach((btn, index) => {
+                btn.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                btn.style.opacity = '0';
+                btn.style.transform = 'translateY(-10px)';
+                
+                setTimeout(() => {
+                    btn.style.display = 'none';
+                }, 300);
+            });
             
             if (tileMoveMode) {
                 tilingMode = false; // כיבוי מצב ריצוף רגיל
                 updateGridTitle();
-                showStatus('מצב הזזת אריחים פעיל - לחץ על אריח להזזה', 'success');
-                highlightMovableTiles();
+                
+                // אנימציה חלקה להדגשת אריחים
+                setTimeout(() => {
+                    showStatus('🔄 מצב הזזת אריחים פעיל - לחץ על אריח להזזה', 'success');
+                    highlightMovableTiles();
+                }, 100);
+                
+                // אפקט קול עדין להפעלת המצב
+                if (typeof Audio !== 'undefined') {
+                    try {
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        const oscillator = audioContext.createOscillator();
+                        const gainNode = audioContext.createGain();
+                        
+                        oscillator.connect(gainNode);
+                        gainNode.connect(audioContext.destination);
+                        
+                        oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+                        oscillator.frequency.exponentialRampToValueAtTime(800, audioContext.currentTime + 0.15);
+                        
+                        gainNode.gain.setValueAtTime(0.08, audioContext.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+                        
+                        oscillator.start(audioContext.currentTime);
+                        oscillator.stop(audioContext.currentTime + 0.15);
+                    } catch (e) {
+                        // אם אין תמיכה ב-Audio API, פשוט נמשיך
+                    }
+                }
             } else {
                 updateGridTitle();
-                showStatus('מצב הזזת אריחים בוטל', 'info');
-                updateGridDisplay();
+                
+                // אנימציה חלקה לכיבוי המצב
+                setTimeout(() => {
+                    showStatus('מצב הזזת אריחים בוטל', 'info');
+                    updateGridDisplay();
+                }, 100);
             }
         }
 
         // הדגשת אריחים הניתנים להזזה
         function highlightMovableTiles() {
-            placedTiles.forEach((tile, index) => {
-                tile.positions.forEach(([row, col]) => {
+            placedTiles.forEach((tile, tileIndex) => {
+                tile.positions.forEach(([row, col], posIndex) => {
                     const cellIndex = row * 60 + col;
                     const cell = document.getElementById('targetGrid').children[cellIndex];
-                    cell.style.boxShadow = '0 0 0 2px #fbbf24 inset'; // הדגשה בצהוב
-                    cell.style.cursor = 'pointer';
+                    
+                    // אנימציה מדורגת לכל אריח
+                    setTimeout(() => {
+                        cell.style.boxShadow = '0 0 0 3px #fbbf24 inset, 0 0 8px rgba(251, 191, 36, 0.4)';
+                        cell.style.cursor = 'pointer';
+                        cell.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                        cell.style.borderRadius = '2px';
+                        cell.style.zIndex = '5';
+                        
+                        // אנימציה עדינה של הבהוב
+                        setTimeout(() => {
+                            cell.style.animation = 'pulse 3s infinite ease-in-out';
+                        }, 100);
+                    }, (tileIndex * 100) + (posIndex * 20));
                 });
             });
         }
@@ -1617,38 +1761,76 @@
             
             selectedTileForMove = tileData;
             
-            // הצגת כפתורי עריכת האריח
+            // הצגת כפתורי עריכת האריח עם אנימציה
             const deleteBtn = document.getElementById('deleteTileBtn');
             const rotateBtn = document.getElementById('rotateTileBtn');
             const flipBtn = document.getElementById('flipTileBtn');
-            deleteBtn.style.display = 'inline-block';
-            rotateBtn.style.display = 'inline-block';
-            flipBtn.style.display = 'inline-block';
             
-            // הדגשת האריח הנבחר עם אנימציה
+            // אנימציה חלקה להצגת הכפתורים
+            [deleteBtn, rotateBtn, flipBtn].forEach((btn, index) => {
+                btn.style.display = 'inline-block';
+                btn.style.opacity = '0';
+                btn.style.transform = 'translateY(-10px)';
+                btn.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                
+                setTimeout(() => {
+                    btn.style.opacity = '1';
+                    btn.style.transform = 'translateY(0)';
+                }, index * 100);
+            });
+            
+            // הדגשת האריח הנבחר עם אנימציה משופרת
             updateGridDisplay();
-            tileData.tile.positions.forEach(([tRow, tCol]) => {
+            tileData.tile.positions.forEach(([tRow, tCol], index) => {
                 const cellIndex = tRow * 60 + tCol;
                 const cell = document.getElementById('targetGrid').children[cellIndex];
                 
-                // הדגשה חזקה עם אנימציה פועמת
-                cell.style.boxShadow = '0 0 0 4px #ef4444 inset, 0 0 10px rgba(239, 68, 68, 0.5)';
-                cell.style.cursor = 'grab';
-                cell.style.transform = 'scale(1.05)';
-                cell.style.transition = 'all 0.2s ease';
-                cell.style.zIndex = '10';
-                
-                // אנימציה פועמת
-                cell.style.animation = 'pulse 1.5s infinite';
+                // אנימציה מדורגת לכל תא
+                setTimeout(() => {
+                    cell.style.boxShadow = '0 0 0 4px #ef4444 inset, 0 0 15px rgba(239, 68, 68, 0.6), 0 0 30px rgba(239, 68, 68, 0.3)';
+                    cell.style.cursor = 'grab';
+                    cell.style.transform = 'scale(1.08)';
+                    cell.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                    cell.style.zIndex = '15';
+                    cell.style.borderRadius = '3px';
+                    
+                    // אנימציה פועמת משופרת
+                    cell.style.animation = 'pulse 2s infinite ease-in-out';
+                }, index * 30); // עיכוב מדורג לכל תא
             });
             
-            // הודעה מותאמת למכשיר
+            // הודעה מותאמת למכשיר עם אפקט
             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            if (isMobile) {
-                showStatus(`🔄 אריח נבחר - גרור להזזה או השתמש בכפתורים לסיבוב/היפוך/מחיקה`, 'info');
-            } else {
-                showStatus(`🔄 אריח נבחר - גרור להזזה, R לסיבוב, F להיפוך, Delete למחיקה`, 'info');
+            const message = isMobile ? 
+                '🔄 אריח נבחר - גרור להזזה או השתמש בכפתורים לסיבוב/היפוך/מחיקה' :
+                '🔄 אריח נבחר - גרור להזזה, R לסיבוב, F להיפוך, Delete למחיקה';
+            
+            showStatus(message, 'info');
+            
+            // הוספת אפקט קול ויזואלי (אם אפשר)
+            if (typeof Audio !== 'undefined') {
+                try {
+                    // יצירת צליל עדין לבחירה
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(1200, audioContext.currentTime + 0.1);
+                    
+                    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+                    
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.1);
+                } catch (e) {
+                    // אם אין תמיכה ב-Audio API, פשוט נמשיך
+                }
             }
+            
             return true;
         }
 
@@ -1658,12 +1840,10 @@
             
             const { tile, index } = selectedTileForMove;
             
-            // חישוב ההפרש כך שמרכז האריח יתיישר עם הסמן
+            // חישוב ההפרש בין המיקום הנוכחי למיקום החדש
             const currentBounds = getTileBounds(tile.positions.map(([r, c]) => [r, c]));
-            const currentCenterRow = Math.floor((currentBounds.minRow + currentBounds.maxRow) / 2);
-            const currentCenterCol = Math.floor((currentBounds.minCol + currentBounds.maxCol) / 2);
-            const deltaRow = targetRow - currentCenterRow;
-            const deltaCol = targetCol - currentCenterCol;
+            const deltaRow = targetRow - currentBounds.minRow;
+            const deltaCol = targetCol - currentBounds.minCol;
             
             // חישוב המיקומים החדשים
             const newPositions = tile.positions.map(([row, col]) => [
@@ -1699,17 +1879,49 @@
             // עדכון מיקום האריח
             tile.positions = newPositions;
             
-            // עדכון התצוגה
-            updateGridDisplay();
-            clearTileDragPreview();
+            // אנימציה חלקה להזזה
+            newPositions.forEach(([row, col], index) => {
+                if (row >= 0 && row < 30 && col >= 0 && col < 60) {
+                    const cellIndex = row * 60 + col;
+                    const cell = document.getElementById('targetGrid').children[cellIndex];
+                    
+                    // אנימציה חלקה להנחה
+                    setTimeout(() => {
+                        cell.style.animation = 'smoothMove 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                        cell.style.transform = 'scale(1)';
+                        cell.style.opacity = '1';
+                    }, index * 50);
+                }
+            });
             
-            // איפוס הבחירה
-            selectedTileForMove = null;
-            
-            showStatus('האריח הוזז בהצלחה!', 'success');
-            
-            // בדיקת השלמת ריצוף
-            checkTilingComplete();
+            // עדכון התצוגה עם עיכוב לאנימציה
+            setTimeout(() => {
+                updateGridDisplay();
+                clearTileDragPreview();
+                
+                // איפוס הבחירה
+                selectedTileForMove = null;
+                
+                // הסתרת כפתורי העריכה עם אנימציה
+                const deleteBtn = document.getElementById('deleteTileBtn');
+                const rotateBtn = document.getElementById('rotateTileBtn');
+                const flipBtn = document.getElementById('flipTileBtn');
+                
+                [deleteBtn, rotateBtn, flipBtn].forEach((btn, index) => {
+                    setTimeout(() => {
+                        btn.style.opacity = '0';
+                        btn.style.transform = 'translateY(-10px)';
+                        setTimeout(() => {
+                            btn.style.display = 'none';
+                        }, 300);
+                    }, index * 50);
+                });
+                
+                showStatus('האריח הוזז בהצלחה! 🎉', 'success');
+                
+                // בדיקת השלמת ריצוף
+                checkTilingComplete();
+            }, newPositions.length * 50 + 200);
             
             return true;
         }
@@ -1720,12 +1932,10 @@
             
             const { tile, index } = selectedTileForMove;
             
-            // חישוב ההפרש כך שמרכז האריח יתיישר עם הסמן
+            // חישוב ההפרש בין המיקום הנוכחי למיקום החדש
             const currentBounds = getTileBounds(tile.positions.map(([r, c]) => [r, c]));
-            const currentCenterRow = Math.floor((currentBounds.minRow + currentBounds.maxRow) / 2);
-            const currentCenterCol = Math.floor((currentBounds.minCol + currentBounds.maxCol) / 2);
-            const deltaRow = targetRow - currentCenterRow;
-            const deltaCol = targetCol - currentCenterCol;
+            const deltaRow = targetRow - currentBounds.minRow;
+            const deltaCol = targetCol - currentBounds.minCol;
             
             // חישוב המיקומים החדשים
             const newPositions = tile.positions.map(([row, col]) => [
@@ -1773,10 +1983,8 @@
             
             const { tile, index } = selectedTileForMove;
             const currentBounds = getTileBounds(tile.positions.map(([r, c]) => [r, c]));
-            const currentCenterRow = Math.floor((currentBounds.minRow + currentBounds.maxRow) / 2);
-            const currentCenterCol = Math.floor((currentBounds.minCol + currentBounds.maxCol) / 2);
-            const deltaRow = targetRow - currentCenterRow;
-            const deltaCol = targetCol - currentCenterCol;
+            const deltaRow = targetRow - currentBounds.minRow;
+            const deltaCol = targetCol - currentBounds.minCol;
             
             const newPositions = tile.positions.map(([row, col]) => [
                 row + deltaRow,
@@ -1796,33 +2004,49 @@
                 return !otherTileAtPosition;
             });
             
-            // הצגת התצוגה המקדימה עם צבעים ברורים
+            // הצגת התצוגה המקדימה עם אנימציות משופרות
             newPositions.forEach(([row, col]) => {
                 if (row >= 0 && row < 30 && col >= 0 && col < 60) {
                     const cellIndex = row * 60 + col;
                     const cell = document.getElementById('targetGrid').children[cellIndex];
                     
                     if (isValidMove) {
-                        // ירוק בהיר עם בורדר ירוק כהה - מיקום תקין
+                        // ירוק בהיר עם אנימציה חלקה - מיקום תקין
                         cell.style.backgroundColor = '#bbf7d0';
                         cell.style.border = '3px solid #16a34a';
-                        cell.style.opacity = '0.9';
-                        cell.style.transform = 'scale(0.95)';
-                        cell.style.transition = 'all 0.1s ease';
+                        cell.style.opacity = '0.85';
+                        cell.style.transform = 'scale(1.05)';
+                        cell.style.transition = 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
+                        cell.style.boxShadow = '0 4px 12px rgba(34, 197, 94, 0.3)';
+                        cell.style.zIndex = '20';
+                        cell.style.animation = 'none'; // ביטול אנימציה קודמת
+                        
+                        // אנימציה עדינה של פולס
+                        setTimeout(() => {
+                            cell.style.animation = 'pulse 2s infinite ease-in-out';
+                        }, 50);
                     } else {
-                        // אדום בהיר עם בורדר אדום כהה - מיקום לא תקין
+                        // אדום בהיר עם אנימציה חלקה - מיקום לא תקין
                         cell.style.backgroundColor = '#fecaca';
                         cell.style.border = '3px solid #dc2626';
                         cell.style.opacity = '0.8';
-                        cell.style.transform = 'scale(0.9)';
-                        cell.style.transition = 'all 0.1s ease';
+                        cell.style.transform = 'scale(0.95)';
+                        cell.style.transition = 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
+                        cell.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)';
+                        cell.style.zIndex = '20';
+                        cell.style.animation = 'none';
+                        
+                        // אנימציה עדינה של רטט
+                        setTimeout(() => {
+                            cell.style.animation = 'shake 0.5s infinite ease-in-out';
+                        }, 50);
                     }
                 }
             });
             
-            // עדכון הודעת הסטטוס
+            // עדכון הודעת הסטטוס עם אפקטים
             if (isValidMove) {
-                showStatus('✅ מיקום תקין - לחץ להנחה', 'success');
+                showStatus('✅ מיקום תקין - שחרר להנחה', 'success');
             } else {
                 showStatus('❌ מיקום לא תקין - בחר מיקום אחר', 'error');
             }
@@ -1844,44 +2068,54 @@
                     cell.style.boxShadow.includes('#16a34a') ||
                     cell.style.boxShadow.includes('#dc2626')) {
                     
+                    // מעבר חלק לניקוי
+                    cell.style.transition = 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
+                    
                     // איפוס לערכי ברירת מחדל
-                    cell.style.boxShadow = '';
-                    cell.style.opacity = '1';
-                    cell.style.transform = '';
-                    cell.style.transition = '';
-                    
-                    // שחזור הצבע המקורי
-                    const row = Math.floor(Array.from(cell.parentNode.children).indexOf(cell) / 60);
-                    const col = Array.from(cell.parentNode.children).indexOf(cell) % 60;
-                    
-                    // בדיקה אם יש אריח במיקום זה
-                    const tileAtPosition = placedTiles.find(tile => 
-                        tile.positions.some(([tRow, tCol]) => tRow === row && tCol === col)
-                    );
-                    
-                    if (tileAtPosition) {
-                        // שחזור צבע האריח
-                        cell.style.backgroundColor = tileAtPosition.color;
-                        const isEdge = isEdgeOfTile(row, col, tileAtPosition.positions);
-                        const borderColor = tileAtPosition.borderColor;
+                    setTimeout(() => {
+                        cell.style.boxShadow = '';
+                        cell.style.opacity = '1';
+                        cell.style.transform = '';
+                        cell.style.borderRadius = '';
+                        cell.style.animation = '';
+                        cell.style.zIndex = '';
                         
-                        const borderParts = [];
-                        borderParts.push(isEdge.top ? `2px solid ${borderColor}` : '1px solid #ffffff');
-                        borderParts.push(isEdge.right ? `2px solid ${borderColor}` : '1px solid #ffffff');
-                        borderParts.push(isEdge.bottom ? `2px solid ${borderColor}` : '1px solid #ffffff');
-                        borderParts.push(isEdge.left ? `2px solid ${borderColor}` : '1px solid #ffffff');
+                        // שחזור הצבע המקורי
+                        const row = Math.floor(Array.from(cell.parentNode.children).indexOf(cell) / 60);
+                        const col = Array.from(cell.parentNode.children).indexOf(cell) % 60;
                         
-                        cell.style.borderTop = borderParts[0];
-                        cell.style.borderRight = borderParts[1];
-                        cell.style.borderBottom = borderParts[2];
-                        cell.style.borderLeft = borderParts[3];
-                    } else {
-                        // שחזור צבע הרקע המקורי, תוך העדפת שכבת ציור ידני אם קיימת
-                        const manualColor = manualPaintLayer[row][col];
-                        const baseColor = manualColor ? manualColor : targetGridData[row][col];
-                        cell.style.backgroundColor = baseColor;
-                        cell.style.border = '1px solid #e5e7eb';
-                    }
+                        // בדיקה אם יש אריח במיקום זה
+                        const tileAtPosition = placedTiles.find(tile => 
+                            tile.positions.some(([tRow, tCol]) => tRow === row && tCol === col)
+                        );
+                        
+                        if (tileAtPosition) {
+                            // שחזור צבע האריח
+                            cell.style.backgroundColor = tileAtPosition.color;
+                            const isEdge = isEdgeOfTile(row, col, tileAtPosition.positions);
+                            const borderColor = tileAtPosition.borderColor;
+                            
+                            const borderParts = [];
+                            borderParts.push(isEdge.top ? `2px solid ${borderColor}` : '1px solid #ffffff');
+                            borderParts.push(isEdge.right ? `2px solid ${borderColor}` : '1px solid #ffffff');
+                            borderParts.push(isEdge.bottom ? `2px solid ${borderColor}` : '1px solid #ffffff');
+                            borderParts.push(isEdge.left ? `2px solid ${borderColor}` : '1px solid #ffffff');
+                            
+                            cell.style.borderTop = borderParts[0];
+                            cell.style.borderRight = borderParts[1];
+                            cell.style.borderBottom = borderParts[2];
+                            cell.style.borderLeft = borderParts[3];
+                        } else {
+                            // שחזור צבע הרקע המקורי
+                            cell.style.backgroundColor = targetGridData[row][col];
+                            cell.style.border = '1px solid #e5e7eb';
+                        }
+                        
+                        // ניקוי מעבר אחרי השלמת הניקוי
+                        setTimeout(() => {
+                            cell.style.transition = '';
+                        }, 200);
+                    }, 100);
                 }
             });
         }
@@ -2164,16 +2398,42 @@
         // הצגת הודעת סטטוס
         function showStatus(message, type) {
             const statusDiv = document.getElementById('tilingStatus');
-            statusDiv.textContent = message;
             
-            const colors = {
-                success: 'bg-green-100 text-green-800',
-                error: 'bg-red-100 text-red-800',
-                info: 'bg-blue-100 text-blue-800',
-                complete: 'bg-purple-100 text-purple-800'
-            };
+            // אנימציה חלקה להודעה חדשה
+            statusDiv.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+            statusDiv.style.opacity = '0';
+            statusDiv.style.transform = 'translateY(-10px)';
             
-            statusDiv.className = `mt-4 p-2 rounded text-center text-sm font-medium ${colors[type] || colors.info}`;
+            setTimeout(() => {
+                statusDiv.textContent = message;
+                
+                const colors = {
+                    success: 'bg-green-100 text-green-800 border border-green-200',
+                    error: 'bg-red-100 text-red-800 border border-red-200',
+                    info: 'bg-blue-100 text-blue-800 border border-blue-200',
+                    complete: 'bg-purple-100 text-purple-800 border border-purple-200'
+                };
+                
+                statusDiv.className = `mt-4 p-3 rounded-lg text-center text-sm font-medium shadow-sm ${colors[type] || colors.info}`;
+                
+                // אנימציה חלקה להצגה
+                statusDiv.style.opacity = '1';
+                statusDiv.style.transform = 'translateY(0)';
+                
+                // אנימציה עדינה לפולס
+                if (type === 'success' || type === 'complete') {
+                    setTimeout(() => {
+                        statusDiv.style.animation = 'pulse 1s ease-in-out';
+                    }, 200);
+                }
+                
+                // אוטו-הסתרה להודעות רגילות
+                if (type === 'info' && !message.includes('נבחר')) {
+                    setTimeout(() => {
+                        statusDiv.style.opacity = '0.7';
+                    }, 3000);
+                }
+            }, 150);
         }
 
         // סיבוב אריח נבחר
