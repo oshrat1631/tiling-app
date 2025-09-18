@@ -1,0 +1,37 @@
+{
+  "name": "tiling-app",
+  "version": "1.0.0",
+  "description": "יישומון אינטראקטיבי מתקדם ליצירת שטחי ריצוף מותאמים אישית",
+  "main": "index.html",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "serve": "npx serve .",
+    "dev": "npx live-server --port=3000"
+  },
+  "keywords": [
+    "tiling",
+    "puzzle",
+    "hebrew",
+    "interactive",
+    "game",
+    "education",
+    "geometry"
+  ],
+  "author": "ים רון",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ronos/tiling-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ronos/tiling-app/issues"
+  },
+  "homepage": "https://github.com/ronos/tiling-app#readme",
+  "devDependencies": {
+    "live-server": "^1.2.2",
+    "serve": "^14.2.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
