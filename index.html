@@ -572,6 +572,13 @@
 
         // Build toolbar early so color buttons get listeners below
         buildOrganizedToolbar();
+        // Widen target panel so action buttons fit inside on medium screens
+        try {
+            var targetPanel = document.getElementById('panel-target');
+            if (targetPanel && targetPanel.classList) {
+                targetPanel.classList.add('md:col-span-2');
+            }
+        } catch (e) { /* no-op */ }
         // Initialize UI state
         setMode('target');
         updateMoveBanner();
