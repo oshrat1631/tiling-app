@@ -574,9 +574,10 @@
         // Build toolbar early so color buttons get listeners below
         buildOrganizedToolbar();
 
-        // Add a quick "ציור יעד" button to the tiling panel header
+        // Add a quick "ציור יעד" button to the UI
         function ensureTargetDrawButton() {
             try {
+                // 1) In the tiling panel header (small gray buttons)
                 const clearBtn = document.querySelector('#panel-tiling button[onclick="clearTiling()"]');
                 if (clearBtn && !document.getElementById('quickTargetModeBtn')) {
                     const btn = document.createElement('button');
@@ -585,6 +586,17 @@
                     btn.textContent = 'ציור יעד';
                     btn.onclick = () => setMode('target');
                     clearBtn.parentElement.insertBefore(btn, clearBtn);
+                }
+
+                // 2) In the top actions row (big colored buttons under "פעולות")
+                const startBtn = document.querySelector('#organizedToolbar button[onclick="startTiling()"]');
+                if (startBtn && !document.getElementById('quickTargetModeBtnActions')) {
+                    const btn2 = document.createElement('button');
+                    btn2.id = 'quickTargetModeBtnActions';
+                    btn2.className = 'control-btn bg-slate-600 hover:bg-slate-700';
+                    btn2.textContent = 'ציור יעד';
+                    btn2.onclick = () => setMode('target');
+                    startBtn.parentElement.insertBefore(btn2, startBtn);
                 }
             } catch (e) { /* ignore */ }
         }
