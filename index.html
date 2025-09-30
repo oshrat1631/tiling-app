@@ -245,9 +245,9 @@
                     <button class="control-btn bg-green-600 hover:bg-green-700" onclick="startTiling()">התחל ריצוף</button>
                     <button class="control-btn bg-red-600 hover:bg-red-700" onclick="stopTiling()">בטל ריצוף</button>
                     <button class="control-btn bg-yellow-600 hover:bg-yellow-700" onclick="toggleTileMoveMode()">🔄 הזזת אריחים</button>
-                    <button class="control-btn bg-red-500 hover:bg-red-600" onclick="deleteSelectedTile()" id="deleteTileBtn" style="display: none;">🗑️ מחק אריח</button>
-                    <button class="control-btn bg-blue-500 hover:bg-blue-600" onclick="rotateSelectedTile()" id="rotateTileBtn" style="display: none;">🔄 סובב אריח</button>
-                    <button class="control-btn bg-green-500 hover:bg-green-600" onclick="flipSelectedTile()" id="flipTileBtn" style="display: none;">🔃 הפוך אריח</button>
+                    <button class="control-btn bg-red-500 hover:bg-red-600" onclick="deleteSelectedTile()" id="deleteTileBtn">🗑️ מחק אריח</button>
+                    <button class="control-btn bg-blue-500 hover:bg-blue-600" onclick="rotateSelectedTile()" id="rotateTileBtn">🔄 סובב אריח</button>
+                    <button class="control-btn bg-green-500 hover:bg-green-600" onclick="flipSelectedTile()" id="flipTileBtn">🔃 הפוך אריח</button>
                     <button class="control-btn" onclick="clearTiling()">נקה ריצוף</button>
                 </div>
                 
@@ -512,9 +512,9 @@
         <button id="moveToggle" class="control-btn bg-yellow-600 hover:bg-yellow-700" onclick="toggleTileMoveMode()">הפעל הזזת אריחים</button>\
       </div>\
       <div class="flex flex-wrap items-center gap-2">\
-        <button id="rotateTileBtn" class="control-btn bg-blue-500 hover:bg-blue-600" onclick="rotateSelectedTile()" style="display: none;">סובב אריח</button>\
-        <button id="flipTileBtn" class="control-btn bg-green-500 hover:bg-green-600" onclick="flipSelectedTile()" style="display: none;">היפוך אריח</button>\
-        <button id="deleteTileBtn" class="control-btn bg-red-500 hover:bg-red-600" onclick="deleteSelectedTile()" style="display: none;">מחק אריח</button>\
+        <button id="rotateTileBtn" class="control-btn bg-blue-500 hover:bg-blue-600" onclick="rotateSelectedTile()">סובב אריח</button>\
+        <button id="flipTileBtn" class="control-btn bg-green-500 hover:bg-green-600" onclick="flipSelectedTile()">היפוך אריח</button>\
+        <button id="deleteTileBtn" class="control-btn bg-red-500 hover:bg-red-600" onclick="deleteSelectedTile()">מחק אריח</button>\
       </div>\
       <p class="mt-2 text-sm text-gray-500">במצב הזזה: לחץ על אריח כדי לבחור אותו. לאחר הבחירה הכפתורים יופיעו.</p>\
     </section>\
@@ -575,7 +575,9 @@
         // Initialize UI state
         setMode('target');
         updateMoveBanner();
+        try { updateMoveControlsState(); } catch(e) {}
         try { setInterval(updateMoveBanner, 500); } catch(e) {}
+        try { setInterval(updateMoveControlsState, 500); } catch(e) {}
 
         // Zoom controls for grid and tiles
         let zoom = 1;
@@ -774,8 +776,8 @@
                                 
                                 // איפוס הבחירה אחרי הזזה מוצלחת
                                 selectedTileForMove = null;
-                                const deleteBtn = document.getElementById('deleteTileBtn');
-                                deleteBtn.style.display = 'none';
+                                // Sync controls after finishing the drag operation
+                                updateMoveControlsState();
                                 clearTileDragPreview();
                                 showStatus('האריח הוזז בהצלחה!', 'success');
                                 checkTilingComplete();
@@ -1815,6 +1817,7 @@
             tilingMode = false;
             tileMoveMode = false;
             selectedTileForMove = null;
+            updateMoveControlsState();
             clearTilePreview();
             updateGridTitle();
             showStatus('מצב ריצוף בוטל - חזרה למצב עיצוב', 'info');
@@ -1835,9 +1838,8 @@
             const deleteBtn = document.getElementById('deleteTileBtn');
             const rotateBtn = document.getElementById('rotateTileBtn');
             const flipBtn = document.getElementById('flipTileBtn');
-            deleteBtn.style.display = 'none';
-            rotateBtn.style.display = 'none';
-            flipBtn.style.display = 'none';
+            // Update visibility and disabled state via single helper
+            updateMoveControlsState();
             
             if (tileMoveMode) {
                 tilingMode = false; // כיבוי מצב ריצוף רגיל
@@ -1882,12 +1884,8 @@
             selectedTileForMove = tileData;
             
             // הצגת כפתורי עריכת האריח
-            const deleteBtn = document.getElementById('deleteTileBtn');
-            const rotateBtn = document.getElementById('rotateTileBtn');
-            const flipBtn = document.getElementById('flipTileBtn');
-            deleteBtn.style.display = 'inline-block';
-            rotateBtn.style.display = 'inline-block';
-            flipBtn.style.display = 'inline-block';
+            // Show enabled controls when a tile is selected
+            updateMoveControlsState();
             
             // הדגשת האריח הנבחר עם אנימציה
             updateGridDisplay();
@@ -2596,12 +2594,8 @@
             
             // איפוס הבחירה והסתרת כפתורי העריכה
             selectedTileForMove = null;
-            const deleteBtn = document.getElementById('deleteTileBtn');
-            const rotateBtn = document.getElementById('rotateTileBtn');
-            const flipBtn = document.getElementById('flipTileBtn');
-            deleteBtn.style.display = 'none';
-            rotateBtn.style.display = 'none';
-            flipBtn.style.display = 'none';
+            // Keep move controls state consistent when clearing tiling
+            updateMoveControlsState();
             
             // עדכון התצוגה
             updateGridDisplay();
@@ -2639,6 +2633,21 @@
         });
 
         // אתחול היישומון
+        // Sync move controls state helper
+        function updateMoveControlsState() {
+            try {
+                const rotateBtn = document.getElementById('rotateTileBtn');
+                const flipBtn = document.getElementById('flipTileBtn');
+                const deleteBtn = document.getElementById('deleteTileBtn');
+                const active = !!tileMoveMode;
+                const hasSelection = !!selectedTileForMove;
+                [rotateBtn, flipBtn, deleteBtn].forEach(btn => {
+                    if (!btn) return;
+                    btn.style.display = active ? 'inline-block' : 'none';
+                    btn.disabled = !active || !hasSelection;
+                });
+            } catch (e) {}
+        }
         initGrids();
         initZoomControls();
         
