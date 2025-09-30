@@ -6,9 +6,12 @@
     <title>יישומון ריצוף צורות</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+        :root {
+            --cell-size: 16px; /* base cell size; adjusted by zoom */
+        }
         .grid-cell {
-            width: 16px;
-            height: 16px;
+            width: var(--cell-size);
+            height: var(--cell-size);
             border: 1px solid #e5e7eb;
             cursor: pointer;
             transition: all 0.1s;
@@ -42,8 +45,8 @@
             border-color: #000;
         }
         .tile-cell {
-            width: 16px;
-            height: 16px;
+            width: var(--cell-size);
+            height: var(--cell-size);
             border: 1px solid #d1d5db;
             cursor: pointer;
             transition: all 0.1s;
@@ -112,15 +115,10 @@
                 margin-bottom: 10px;
             }
             
-            .grid-cell {
-                width: 4px;
-                height: 4px;
-                border-width: 0.5px;
+            :root {
+                --cell-size: 8px; /* smaller default on tablets/phones */
             }
-            
-            .tile-cell {
-                width: 8px;
-                height: 8px;
+            .grid-cell, .tile-cell {
                 border-width: 0.5px;
             }
             
@@ -172,15 +170,10 @@
                 padding: 0 2px;
             }
             
-            .grid-cell {
-                width: 3px;
-                height: 3px;
-                border-width: 0.5px;
+            :root {
+                --cell-size: 6px; /* smallest default on narrow phones */
             }
-            
-            .tile-cell {
-                width: 6px;
-                height: 6px;
+            .grid-cell, .tile-cell {
                 border-width: 0.5px;
             }
             
@@ -218,12 +211,12 @@
                 <div class="flex items-center gap-3">
                     <span class="text-sm font-medium text-gray-700">צבע:</span>
                     <div class="flex gap-2">
-                        <div class="color-btn selected" style="background-color: #ef4444" data-color="#ef4444"></div>
-                        <div class="color-btn" style="background-color: #3b82f6" data-color="#3b82f6"></div>
-                        <div class="color-btn" style="background-color: #10b981" data-color="#10b981"></div>
-                        <div class="color-btn" style="background-color: #f59e0b" data-color="#f59e0b"></div>
-                        <div class="color-btn" style="background-color: #8b5cf6" data-color="#8b5cf6"></div>
-                        <div class="color-btn" style="background-color: #ec4899" data-color="#ec4899"></div>
+                        <div class="color-btn selected" style="background-color: #fecaca" data-color="#fecaca"></div>
+                        <div class="color-btn" style="background-color: #bfdbfe" data-color="#bfdbfe"></div>
+                        <div class="color-btn" style="background-color: #bbf7d0" data-color="#bbf7d0"></div>
+                        <div class="color-btn" style="background-color: #fde68a" data-color="#fde68a"></div>
+                        <div class="color-btn" style="background-color: #ddd6fe" data-color="#ddd6fe"></div>
+                        <div class="color-btn" style="background-color: #fbcfe8" data-color="#fbcfe8"></div>
                         <div class="color-btn" style="background-color: #ffffff; border-color: #374151" data-color="#ffffff"></div>
                     </div>
                 </div>
@@ -277,7 +270,7 @@
                 
                 <!-- גריד עיצוב האריח -->
                 <div class="border-2 border-gray-300 p-2 bg-white inline-block mb-3">
-                    <div id="tileGrid" class="grid grid-cols-10 gap-0"></div>
+                    <div id="tileGrid" class="grid gap-0" style="grid-template-columns: repeat(10, var(--cell-size));"></div>
                 </div>
                 
                 <!-- תצוגת כל תצורות האריח -->
@@ -293,7 +286,7 @@
                 
                 <!-- גריד היעד -->
                 <div class="border-2 border-gray-300 p-2 bg-white inline-block overflow-auto max-h-96">
-                    <div id="targetGrid" class="grid gap-0" style="grid-template-columns: repeat(60, 1fr);"></div>
+                    <div id="targetGrid" class="grid gap-0" style="grid-template-columns: repeat(60, var(--cell-size));"></div>
                 </div>
             </div>
         </div>
@@ -395,7 +388,7 @@
     </div>
 
     <script>
-        let selectedColor = '#ef4444';
+        let selectedColor = '#fecaca';
         let targetGridData = [];
         let tileGridData = [];
         let currentTile = [];
@@ -416,6 +409,95 @@
         let tileMoveMode = false;
         let selectedTileForMove = null;
         let draggedTile = null;
+
+        // Zoom controls for grid and tiles
+        let zoom = 1;
+        const zoomMin = 0.5;
+        const zoomMax = 3.0;
+        const zoomStep = 0.1;
+        let baseCellSize = null; // detected from CSS variable on load
+
+        function initZoomControls() {
+            const root = document.documentElement;
+            const raw = getComputedStyle(root).getPropertyValue('--cell-size').trim();
+            const numeric = parseFloat(raw || '16');
+            baseCellSize = isNaN(numeric) ? 16 : numeric;
+
+            // Ensure controls exist; if not, create them in the top toolbar
+            let slider = document.getElementById('zoomSlider');
+            let zoomOutBtn = document.getElementById('zoomOutBtn');
+            let zoomInBtn = document.getElementById('zoomInBtn');
+            let zoomValue = document.getElementById('zoomValue');
+
+            if (!slider || !zoomOutBtn || !zoomInBtn || !zoomValue) {
+                const toolbar = document.querySelector('.bg-white.p-4.rounded-lg.shadow-lg.mb-6 .flex.flex-wrap.items-center.justify-center.gap-6');
+                if (toolbar) {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'flex items-center gap-2';
+                    wrap.innerHTML = `
+                        <span class="text-sm font-medium text-gray-700">זום:</span>
+                        <button id="zoomOutBtn" class="control-btn" title="Zoom Out">-</button>
+                        <input id="zoomSlider" type="range" min="0.5" max="3" step="0.1" value="1" class="w-40 align-middle" />
+                        <button id="zoomInBtn" class="control-btn" title="Zoom In">+</button>
+                        <span id="zoomValue" class="text-sm text-gray-600">100%</span>
+                    `;
+                    toolbar.appendChild(wrap);
+                }
+                // re-query after injection
+                slider = document.getElementById('zoomSlider');
+                zoomOutBtn = document.getElementById('zoomOutBtn');
+                zoomInBtn = document.getElementById('zoomInBtn');
+                zoomValue = document.getElementById('zoomValue');
+            }
+
+            function applyZoom() {
+                const size = (baseCellSize * zoom).toFixed(2) + 'px';
+                root.style.setProperty('--cell-size', size);
+                if (slider) slider.value = String(zoom);
+                if (zoomValue) zoomValue.textContent = Math.round(zoom * 100) + '%';
+            }
+
+            function setZoom(z) {
+                zoom = Math.min(zoomMax, Math.max(zoomMin, z));
+                applyZoom();
+            }
+
+            // expose setter for keyboard handler
+            window.__setZoom = setZoom;
+
+            // init UI with current zoom
+            applyZoom();
+
+            if (slider) slider.addEventListener('input', (e) => {
+                const v = parseFloat(e.target.value);
+                if (!isNaN(v)) setZoom(v);
+            });
+            if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => {
+                setZoom(Math.round((zoom - zoomStep) * 10) / 10);
+            });
+            if (zoomInBtn) zoomInBtn.addEventListener('click', () => {
+                setZoom(Math.round((zoom + zoomStep) * 10) / 10);
+            });
+
+            const targetGridEl = document.getElementById('targetGrid');
+            if (targetGridEl) {
+                targetGridEl.addEventListener('wheel', (e) => {
+                    if (e.ctrlKey || e.altKey) {
+                        e.preventDefault();
+                        const dir = e.deltaY > 0 ? -1 : 1;
+                        setZoom(Math.round((zoom + dir * zoomStep) * 10) / 10);
+                    }
+                }, { passive: false });
+            }
+        }
+
+        // keyboard +/- zoom (skip when typing in inputs)
+        document.addEventListener('keydown', function(evt){
+            const tag = (evt.target && evt.target.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || evt.metaKey || evt.ctrlKey) return;
+            if (evt.key === '+' || evt.key === '=') { evt.preventDefault(); if (window.__setZoom) window.__setZoom(zoom + zoomStep); }
+            if (evt.key === '-' || evt.key === '_') { evt.preventDefault(); if (window.__setZoom) window.__setZoom(zoom - zoomStep); }
+        });
 
 
         // אתחול הגרידים
@@ -763,12 +845,12 @@
                 tile.positions.forEach(([row, col]) => {
                     const cellIndex = row * 60 + col;
                     const cell = document.getElementById('targetGrid').children[cellIndex];
-                    cell.style.backgroundColor = tile.color || '#7dd3fc';
+                    cell.style.backgroundColor = tile.color || '#0ea5e9';
                     cell.style.transition = 'all 0.05s ease';
                     
                     // קביעת הבורדר
                     const isEdge = isEdgeOfTile(row, col, tile.positions);
-                    const borderColor = tile.borderColor || '#1e40af';
+                    const borderColor = tile.borderColor || '#075985';
                     
                     cell.style.borderTop = isEdge.top ? `2px solid ${borderColor}` : '1px solid #ffffff';
                     cell.style.borderRight = isEdge.right ? `2px solid ${borderColor}` : '1px solid #ffffff';
@@ -1351,8 +1433,20 @@
                 shapeCreationMode: shapeCreationMode
             };
             
-            actionHistory.push(state);
-            historyIndex++;
+            // Avoid pushing duplicate snapshots
+            const last = actionHistory.length > 0 ? actionHistory[actionHistory.length - 1] : null;
+            let isDuplicate = false;
+            if (last) {
+                try {
+                    isDuplicate = JSON.stringify(last) === JSON.stringify(state);
+                } catch (e) {
+                    isDuplicate = false;
+                }
+            }
+            if (!isDuplicate) {
+                actionHistory.push(state);
+                historyIndex++;
+            }
             
             // שמירה על מקסימום 50 פעולות
             if (actionHistory.length > 50) {
@@ -1482,11 +1576,11 @@
                 tile.positions.forEach(([row, col]) => {
                     const cellIndex = row * 60 + col;
                     const cell = document.getElementById('targetGrid').children[cellIndex];
-                    cell.style.backgroundColor = tile.color || '#7dd3fc';
+                    cell.style.backgroundColor = tile.color || '#0ea5e9';
                     
                     // קביעת הבורדר - צבע הבורדר של האריח לקווי המתאר החיצוניים, לבן לקווים הפנימיים
                     const isEdge = isEdgeOfTile(row, col, tile.positions);
-                    const borderColor = tile.borderColor || '#1e40af';
+                    const borderColor = tile.borderColor || '#075985';
                     
                     // בניית הבורדר המותאם אישית
                     cell.style.borderTop = isEdge.top ? `2px solid ${borderColor}` : '1px solid #ffffff';
@@ -2009,6 +2103,26 @@
             { bg: '#fdf2f8', border: '#f472b6' }  // ורוד בהיר
         ];
 
+        // Override tileColors to use darker tones for placed tiles
+        try {
+            if (Array.isArray(tileColors)) {
+                tileColors.splice(0, tileColors.length,
+                    { bg: '#f59e0b', border: '#92400e' },
+                    { bg: '#8b5cf6', border: '#5b21b6' },
+                    { bg: '#ec4899', border: '#9d174d' },
+                    { bg: '#10b981', border: '#065f46' },
+                    { bg: '#ef4444', border: '#7f1d1d' },
+                    { bg: '#0ea5e9', border: '#075985' },
+                    { bg: '#f97316', border: '#7c2d12' },
+                    { bg: '#a855f7', border: '#581c87' },
+                    { bg: '#22c55e', border: '#14532d' },
+                    { bg: '#f43f5e', border: '#9f1239' }
+                );
+            }
+        } catch (e) {
+            console.warn('Failed to override tileColors', e);
+        }
+
         // הנחת אריח במיקום
         function placeTileAt(clickRow, clickCol) {
             console.log('placeTileAt called:', clickRow, clickCol, 'tilingMode:', tilingMode, 'currentTile length:', currentTile.length);
@@ -2064,6 +2178,8 @@
                 color: tileColor.bg,
                 borderColor: tileColor.border
             });
+
+            saveState();
             
             console.log('Tile placed successfully, total tiles:', placedTiles.length);
             
@@ -2235,6 +2351,7 @@
             
             // בדיקת השלמת ריצוף
             checkTilingComplete();
+            saveState();
         }
 
         // היפוך אריח נבחר
@@ -2291,6 +2408,7 @@
             
             // בדיקת השלמת ריצוף
             checkTilingComplete();
+            saveState();
         }
 
         // מחיקת אריח נבחר
@@ -2355,6 +2473,7 @@
 
         // אתחול היישומון
         initGrids();
+        initZoomControls();
         
         // שמירת המצב הראשוני
         saveState();
