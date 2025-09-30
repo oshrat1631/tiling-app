@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ניסוי ארגון לחצנים — יישומון ריצוף</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .group-title { font-weight: 600; color: #374151; }
+        .toolbar { position: sticky; top: 0; z-index: 40; backdrop-filter: blur(4px); }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+    <div class="max-w-7xl mx-auto p-4">
+        <h1 class="text-3xl font-bold text-center mb-6">ניסוי — ארגון לחצנים לזרימת עבודה טובה יותר</h1>
+
+        <!-- Toolbar: Primary controls grouped logically -->
+        <div class="toolbar bg-white/80 border border-gray-200 rounded-lg shadow p-3 mb-4">
+            <div class="flex flex-col gap-3">
+                <!-- Row 1: History | Modes | Actions | Help -->
+                <div class="flex flex-wrap items-center gap-3 justify-between">
+                    <!-- History -->
+                    <div class="flex items-center gap-2">
+                        <span class="group-title mr-1">היסטוריה</span>
+                        <button class="px-3 py-2 rounded bg-gray-600 hover:bg-gray-700 text-white text-sm" onclick="undo()">↶ ביטול</button>
+                        <button class="px-3 py-2 rounded bg-gray-600 hover:bg-gray-700 text-white text-sm" onclick="redo()">↷ חזרה</button>
+                    </div>
+
+                    <!-- Modes (segmented) -->
+                    <div class="flex items-center gap-2">
+                        <span class="group-title mr-1">מצבים</span>
+                        <div class="inline-flex gap-1" role="tablist">
+                            <button id="mode-target" class="px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 active" onclick="setMode('target')">ציור יעד</button>
+                            <button id="mode-tile" class="px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50" onclick="setMode('tile')">עיצוב אריח</button>
+                            <button id="mode-tiling" class="px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50" onclick="setMode('tiling')">ריצוף</button>
+                            <button id="mode-move" class="px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50" onclick="toggleMoveMode()">הזזת אריחים</button>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex items-center gap-2">
+                        <span class="group-title mr-1">פעולות</span>
+                        <button class="px-3 py-2 rounded bg-green-600 hover:bg-green-700 text-white text-sm" onclick="startTiling()">התחל ריצוף</button>
+                        <button class="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm" onclick="stopTiling()">בטל ריצוף</button>
+                        <button class="px-3 py-2 rounded bg-slate-600 hover:bg-slate-700 text-white text-sm" onclick="clearTiling()">נקה ריצוף</button>
+                    </div>
+
+                    <!-- Help -->
+                    <div class="flex items-center gap-2">
+                        <span class="group-title mr-1">עזרה</span>
+                        <button class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-sm" onclick="showInstructions()">הוראות</button>
+                    </div>
+                </div>
+
+                <!-- Row 1.5: Move mode banner -->
+                <div id="moveBanner" class="hidden bg-yellow-50 border border-yellow-200 rounded p-2 text-sm text-yellow-900 flex items-center gap-2">
+                    <span>🔄 מצב הזזת אריחים פעיל</span>
+                    <span class="mx-1 text-yellow-700">•</span>
+                    <span>בחר/י אריח ואז השתמש/י בפעולות למטה.</span>
+                    <span class="mx-1 text-yellow-700">•</span>
+                    <span>קיצורי מקשים: <kbd class="px-1 border rounded bg-white">R</kbd> סיבוב, <kbd class="px-1 border rounded bg-white">F</kbd> היפוך, <kbd class="px-1 border rounded bg-white">Delete</kbd> מחיקה</span>
+                </div>
+
+                <!-- Row 2: Context panels per mode -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <!-- Target painting panel -->
+                    <section id="panel-target" class="bg-white border border-gray-200 rounded-lg p-3 shadow">
+                        <div class="flex items-center justify-between mb-2">
+                            <h2 class="group-title">ציור יעד</h2>
+                            <div class="flex items-center gap-2">
+                                <button class="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs border" onclick="clearTarget()">נקה יעד</button>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm">צבע:</span>
+                                <div class="flex gap-2">
+                                    <div class="w-5 h-5 rounded border cursor-pointer" style="background:#fecaca" title="#fecaca"></div>
+                                    <div class="w-5 h-5 rounded border cursor-pointer" style="background:#bfdbfe" title="#bfdbfe"></div>
+                                    <div class="w-5 h-5 rounded border cursor-pointer" style="background:#bbf7d0" title="#bbf7d0"></div>
+                                    <div class="w-5 h-5 rounded border cursor-pointer" style="background:#fde68a" title="#fde68a"></div>
+                                    <div class="w-5 h-5 rounded border cursor-pointer" style="background:#ddd6fe" title="#ddd6fe"></div>
+                                    <div class="w-5 h-5 rounded border cursor-pointer" style="background:#fbcfe8" title="#fbcfe8"></div>
+                                    <div class="w-5 h-5 rounded border cursor-pointer" style="background:#ffffff;border-color:#374151" title="#ffffff"></div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm">גודל אזור:</span>
+                                <input type="number" class="w-16 px-2 py-1 border rounded text-center text-sm" min="1" max="30" value="10" aria-label="רוחב" />
+                                <span class="text-xs text-gray-500">×</span>
+                                <input type="number" class="w-16 px-2 py-1 border rounded text-center text-sm" min="1" max="30" value="10" aria-label="גובה" />
+                                <button class="px-3 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm" onclick="createAutoShape()">צור אזור אוטומטי</button>
+                                <button class="px-3 py-2 rounded bg-orange-600 hover:bg-orange-700 text-white text-sm" onclick="finishShapeCreation()">סיום ציור</button>
+                                <button class="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm hidden" id="deleteShapeBtn" onclick="deleteSelectedShape()">מחק אזור</button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Tile design panel -->
+                    <section id="panel-tile" class="bg-white border border-gray-200 rounded-lg p-3 shadow hidden">
+                        <div class="flex items-center justify-between mb-2">
+                            <h2 class="group-title">עיצוב אריח</h2>
+                            <div class="flex items-center gap-2">
+                                <button class="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs border" onclick="clearTile()">נקה אריח</button>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button class="px-3 py-2 rounded bg-blue-500 hover:bg-blue-600 text-white text-sm" onclick="rotateTile()">סובב 90°</button>
+                            <button class="px-3 py-2 rounded bg-green-500 hover:bg-green-600 text-white text-sm" onclick="flipTile()">היפוך</button>
+                        </div>
+                    </section>
+
+                    <!-- Placement/selection actions -->
+                    <section id="panel-tiling" class="bg-white border border-gray-200 rounded-lg p-3 shadow hidden">
+                        <div class="flex items-center justify-between mb-2">
+                            <h2 class="group-title">ניהול אריחים</h2>
+                            <div class="flex items-center gap-2">
+                                <button class="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs border" onclick="clearTiling()">נקה ריצוף</button>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 mb-2">
+                            <button id="moveToggle" class="px-3 py-2 rounded bg-yellow-600 hover:bg-yellow-700 text-white text-sm" onclick="toggleMoveMode()">הפעל הזזת אריחים</button>
+                            <button id="simulateSelectBtn" class="px-3 py-2 rounded bg-slate-600 hover:bg-slate-700 text-white text-sm" onclick="simulateSelection()">בחר אריח (תצוגה)</button>
+                            <button id="clearSelectBtn" class="px-3 py-2 rounded bg-gray-100 text-gray-700 text-sm border hidden" onclick="clearSelection()">נקה בחירה</button>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button id="btnRotateSel" class="px-3 py-2 rounded bg-blue-500 hover:bg-blue-600 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed" onclick="rotateSelectedTile()">סובב אריח</button>
+                            <button id="btnFlipSel" class="px-3 py-2 rounded bg-green-500 hover:bg-green-600 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed" onclick="flipSelectedTile()">היפוך אריח</button>
+                            <button id="btnDeleteSel" class="px-3 py-2 rounded bg-red-500 hover:bg-red-600 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed" onclick="deleteSelectedTile()">מחק אריח</button>
+                        </div>
+                        <p id="tilingHintNoSel" class="mt-2 text-sm text-gray-500">במצב הזזה: לחץ/י על אריח כדי לבחור אותו. לאחר הבחירה יופעלו פעולות סיבוב/היפוך/מחיקה.</p>
+                        <p id="tilingHintSel" class="mt-2 text-sm text-gray-600 hidden">אריח נבחר. ניתן להשתמש בפעולות למעלה או בקיצורים: R, F, Delete.</p>
+                    </section>
+                </div>
+            </div>
+        </div>
+
+        <!-- Playground note -->
+        <div class="bg-amber-50 border border-amber-200 text-amber-900 rounded p-3 text-sm">
+            זהו קובץ אב־טיפוס להצעת ארגון לחצנים. אין חיבור לפונקציות היישום, והלחצנים רק מדגימים את הזרימה והקיבוץ. אם תרצה, אחבר זאת למסך הראשי בפועל.
+        </div>
+    </div>
+
+    <script>
+        // Prototype only — stub handlers and mode switching
+        const modeButtons = {
+            target: document.getElementById('mode-target'),
+            tile: document.getElementById('mode-tile'),
+            tiling: document.getElementById('mode-tiling'),
+            move: document.getElementById('mode-move')
+        };
+        const panels = {
+            target: document.getElementById('panel-target'),
+            tile: document.getElementById('panel-tile'),
+            tiling: document.getElementById('panel-tiling')
+        };
+        let moveMode = false;
+        let hasSelection = false;
+
+        function setMode(name) {
+            Object.values(modeButtons).forEach(b => b.classList.remove('active'));
+            if (modeButtons[name]) modeButtons[name].classList.add('active');
+            panels.target.classList.toggle('hidden', name !== 'target');
+            panels.tile.classList.toggle('hidden', name !== 'tile');
+            panels.tiling.classList.toggle('hidden', name !== 'tiling');
+            logAction('setMode', name);
+            updateUI();
+        }
+        function toggleMoveMode() {
+            moveMode = !moveMode;
+            modeButtons.move.classList.toggle('active', moveMode);
+            if (moveMode) setMode('tiling');
+            logAction('toggleMoveMode', moveMode);
+            updateUI();
+        }
+        function simulateSelection() {
+            hasSelection = true;
+            logAction('simulateSelection', true);
+            updateUI();
+        }
+        function clearSelection() {
+            hasSelection = false;
+            logAction('clearSelection', false);
+            updateUI();
+        }
+
+        function updateUI() {
+            // Banner
+            document.getElementById('moveBanner').classList.toggle('hidden', !moveMode);
+            // Move toggle label
+            const moveToggle = document.getElementById('moveToggle');
+            moveToggle.textContent = moveMode ? 'כבה הזזת אריחים' : 'הפעל הזזת אריחים';
+            moveToggle.className = moveMode
+                ? 'px-3 py-2 rounded bg-yellow-700 hover:bg-yellow-800 text-white text-sm'
+                : 'px-3 py-2 rounded bg-yellow-600 hover:bg-yellow-700 text-white text-sm';
+            // Selection controls visibility
+            document.getElementById('simulateSelectBtn').classList.toggle('hidden', hasSelection);
+            document.getElementById('clearSelectBtn').classList.toggle('hidden', !hasSelection);
+            // Enable/disable tile action buttons
+            const enable = moveMode && hasSelection;
+            ['btnRotateSel','btnFlipSel','btnDeleteSel'].forEach(id => {
+                const el = document.getElementById(id);
+                el.disabled = !enable;
+            });
+            // Hints
+            document.getElementById('tilingHintNoSel').classList.toggle('hidden', !moveMode || hasSelection);
+            document.getElementById('tilingHintSel').classList.toggle('hidden', !moveMode || !hasSelection);
+        }
+
+        // Stubs for actions (prototype)
+        const stub = (name) => () => logAction(name);
+        const clearTarget = stub('clearTarget');
+        const clearTile = stub('clearTile');
+        const rotateTile = stub('rotateTile');
+        const flipTile = stub('flipTile');
+        const startTiling = stub('startTiling');
+        const stopTiling = stub('stopTiling');
+        const clearTiling = stub('clearTiling');
+        const deleteSelectedTile = stub('deleteSelectedTile');
+        const rotateSelectedTile = stub('rotateSelectedTile');
+        const flipSelectedTile = stub('flipSelectedTile');
+        const undo = stub('undo');
+        const redo = stub('redo');
+        const showInstructions = stub('showInstructions');
+        const createAutoShape = stub('createAutoShape');
+        const finishShapeCreation = stub('finishShapeCreation');
+        const deleteSelectedShape = stub('deleteSelectedShape');
+
+        function logAction(name, data) {
+            console.log(`[prototype] ${name}`, data ?? '');
+        }
+
+        // Default
+        setMode('target');
+        updateUI();
+    </script>
+</body>
+</html>
